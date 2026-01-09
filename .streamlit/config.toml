@@ -1,0 +1,25 @@
+[theme]
+# The primary accent color for buttons, sliders, and interactive elements
+primaryColor = "#00D2FF"
+
+# The background color for the main chat area
+backgroundColor = "#0E1117"
+
+# The background color for the sidebar and input widgets
+secondaryBackgroundColor = "#1A1C24"
+
+# The color of the text
+textColor = "#FAFAFA"
+
+# Options: "sans serif", "serif", or "monospace"
+font = "sans serif"
+
+[server]
+# Recommended for cloud deployment to save resources
+headless = true
+enableCORS = false
+enableXsrfProtection = true
+
+[browser]
+# Removes the "GatherUsageStats" popup
+gatherUsageStats = false
