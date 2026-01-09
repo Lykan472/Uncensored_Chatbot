@@ -56,7 +56,7 @@ chatbot = get_chatbot()
 # 4. SIDEBAR - CHAT MANAGEMENT
 st.sidebar.title("💬 Chat History")
 
-# Initialize threads in session state if not present
+# Initialize state
 if "threads" not in st.session_state:
     st.session_state.threads = {"New Conversation": str(uuid.uuid4())}
 if "current_thread_name" not in st.session_state:
@@ -71,13 +71,26 @@ def create_new_chat():
     st.session_state.current_thread_name = new_name
 
 st.sidebar.button("➕ New Chat", on_click=create_new_chat, use_container_width=True)
-
-# Sidebar selection list (simulating ChatGPT sidebar)
 st.sidebar.markdown("---")
+
+# Render Sidebar List with Delete Options
 for chat_name in list(st.session_state.threads.keys()):
-    # Highlight the currently active chat
-    if st.sidebar.button(chat_name, key=chat_name, use_container_width=True):
+    col1, col2 = st.sidebar.columns([0.8, 0.2])
+    
+    # Selection Button
+    if col1.button(chat_name, key=f"select_{chat_name}", use_container_width=True):
         st.session_state.current_thread_name = chat_name
+        st.rerun()
+    
+    # Delete Button
+    if col2.button("🗑️", key=f"delete_{chat_name}"):
+        del st.session_state.threads[chat_name]
+        # If we delete the current chat, reset to another one or create new
+        if st.session_state.current_thread_name == chat_name:
+            if st.session_state.threads:
+                st.session_state.current_thread_name = list(st.session_state.threads.keys())[0]
+            else:
+                create_new_chat()
         st.rerun()
 
 # 5. MAIN CHAT UI
@@ -90,15 +103,13 @@ config = {"configurable": {"thread_id": active_thread_id}}
 state = chatbot.get_state(config)
 chat_history = state.values.get("messages", []) if state.values else []
 
-# Display Messages
 for msg in chat_history:
     role = "user" if isinstance(msg, HumanMessage) else "assistant"
     with st.chat_message(role):
         st.markdown(msg.content)
 
-# Input Box
 if prompt := st.chat_input("Ask anything..."):
-    # Append the first message to the name if it's still 'New Conversation'
+    # Rename 'New Conversation' on first message
     if active_thread_name == "New Conversation":
         new_name = prompt[:20] + "..." if len(prompt) > 20 else prompt
         st.session_state.threads[new_name] = st.session_state.threads.pop("New Conversation")
