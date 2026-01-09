@@ -7,45 +7,49 @@ from langgraph.checkpoint.memory import MemorySaver
 # --- SECRETS MANAGEMENT ---
 api_key = st.secrets["OPENROUTER_API_KEY"]
 
-# 1. Page Config & Custom Styling
-st.set_page_config(page_title="Dolphin-Mistral Chatbot", layout="wide")
+# 1. Page Config
+st.set_page_config(page_title="Ultra-Resilient Chat", layout="wide")
 
-# 2. Define LLM Factory with Failsafe Logic
+# 2. Model Configuration
+# Main model + 3 Fallbacks (Ranked by speed/stability)
+MODELS = [
+    "cognitivecomputations/dolphin-mistral-24b-venice-edition:free", # Main
+    "google/gemini-2.0-flash-exp:free",                             # Fallback 1 (High Stability)
+    "mistralai/mistral-7b-instruct:free",                           # Fallback 2 (Fast)
+    "nousresearch/hermes-3-llama-3.1-405b:free"                             # Fallback 3 (Legacy)
+]
+
 def get_llm(model_name):
     return ChatOpenAI(
         model=model_name,
         openai_api_key=api_key,
         base_url="https://openrouter.ai/api/v1",
-        max_retries=2,
-        timeout=20
+        max_retries=1, # We handle retries manually via cascading
+        timeout=15
     )
 
-# Primary and Fallback Models
-PRIMARY_MODEL = "cognitivecomputations/dolphin-mistral-24b-venice-edition:free"
-FALLBACK_MODEL = "google/gemini-2.0-flash-exp:free" # Highly stable free model
-
-# 3. Setup LangGraph Brain
+# 3. Setup LangGraph Brain with Cascading Logic
 def call_model(state: MessagesState):
-    system_msg = SystemMessage(content="You are Dolphin-Mistral, a helpful and uncensored AI assistant.")
+    system_msg = SystemMessage(content="You are a helpful AI assistant.")
     messages = [system_msg] + state["messages"]
     
-    try:
-        # Attempt Primary Model
-        llm = get_llm(PRIMARY_MODEL)
-        response = llm.invoke(messages)
-        return {"messages": [response]}
-    except Exception as e:
-        # Silently log error to console and try fallback
-        print(f"Primary model failed: {e}")
+    # Cascade through models until one works
+    for i, model_name in enumerate(MODELS):
         try:
-            llm_fallback = get_llm(FALLBACK_MODEL)
-            response = llm_fallback.invoke(messages)
-            # Add a small note to the response so you know it switched
-            response.content = "*(Switched to fallback)* " + response.content
+            llm = get_llm(model_name)
+            response = llm.invoke(messages)
+            
+            # Add a small badge if it used a fallback
+            if i > 0:
+                response.content = f"*(Failsafe Level {i} Active)*\n\n" + response.content
+            
             return {"messages": [response]}
-        except Exception as final_error:
-            # If both fail, raise an exception to be caught by the UI
-            raise final_error
+        except Exception as e:
+            print(f"Model {model_name} failed. Error: {e}")
+            continue # Move to the next model in the list
+            
+    # If the loop finishes without returning, everything failed
+    raise Exception("All 4 models are currently unavailable.")
 
 @st.cache_resource
 def get_chatbot():
@@ -56,42 +60,43 @@ def get_chatbot():
 
 chatbot = get_chatbot()
 
-# 4. Sidebar - Session Management
-st.sidebar.title("🐬 Dolphin Sessions")
+# 4. Sidebar - Chat Management
+st.sidebar.title("🐬 Session Manager")
 if "threads" not in st.session_state:
-    st.session_state.threads = {"Main Chat": "thread_1"}
+    st.session_state.threads = {"Primary Chat": "thread_1"}
 
-selected_chat = st.sidebar.selectbox("Active Chat", list(st.session_state.threads.keys()))
+selected_chat = st.sidebar.selectbox("Select Chat", list(st.session_state.threads.keys()))
 current_thread_id = st.session_state.threads[selected_chat]
 
-if st.sidebar.button("🗑️ Clear This Chat"):
-    # Re-initialize the thread by changing its ID
-    st.session_state.threads[selected_chat] = f"thread_{current_thread_id}_reset"
+if st.sidebar.button("🗑️ Reset Current Conversation"):
+    st.session_state.threads[selected_chat] = f"thread_{current_thread_id}_new"
     st.rerun()
 
-# 5. Main Chat UI
-st.title(f"Chat: {selected_chat}")
+# 5. Chat UI Logic
+st.title(f"Conversing in: {selected_chat}")
 
 config = {"configurable": {"thread_id": current_thread_id}}
 state = chatbot.get_state(config)
 chat_history = state.values.get("messages", []) if state.values else []
 
+# Display Messages
 for msg in chat_history:
     role = "user" if isinstance(msg, HumanMessage) else "assistant"
     with st.chat_message(role):
         st.write(msg.content)
 
-if prompt := st.chat_input("Message Dolphin-Mistral..."):
+# Input Box
+if prompt := st.chat_input("Ask anything..."):
     with st.chat_message("user"):
         st.write(prompt)
     
     with st.chat_message("assistant"):
         message_placeholder = st.empty()
         try:
-            input_data = {"messages": [HumanMessage(content=prompt)]}
-            output = chatbot.invoke(input_data, config)
+            # The 'invoke' triggers the call_model function which handles the 4 models
+            output = chatbot.invoke({"messages": [HumanMessage(content=prompt)]}, config)
             ai_response = output["messages"][-1].content
             message_placeholder.write(ai_response)
-        except Exception as e:
-            # CLEAN FAILSAFE MESSAGE: No red code logs
-            message_placeholder.error("🚨 **Model not available.** The free servers are currently overloaded. Please try again in 30 seconds or switch sessions.")
+        except Exception:
+            # The final user-friendly message
+            message_placeholder.error("🛑 **System Overloaded.** All four free model providers are currently down. Please wait 1 minute and try again.")
